@@ -1,0 +1,107 @@
+#include <stdio.h>
+#include <sys/mman.h>
+
+#include "dynasm/dasm_proto.h"
+#include "dynasm/dasm_x86.h"
+
+|.arch x64
+|.actionlist actions
+|.define M, rdi
+
+int main(int argc, char *argv[]) {
+  if (argc != 2) {
+    return 1;
+  }
+  FILE *f = fopen(argv[1], "r");
+  if (!f) {
+    perror("fopen");
+    return 1;
+  }
+
+  dasm_State *state;
+  dasm_State **Dst = &state;
+  dasm_init(Dst, 1);
+  dasm_setup(Dst, actions);
+
+  unsigned long loops[100], *loop = loops, nextpc = 0;
+  for (;;) {
+    int c = fgetc(f);
+    if (c == EOF) {
+      break;
+    }
+    int n = 1;
+    if (c == '+' || c == '-' || c == '<' || c == '>') {
+      int nc;
+      while ((nc=fgetc(f)) == c) n++;
+      ungetc(nc, f);
+    }
+    switch (c) {
+      case '+':
+	| add byte [M], n
+	break;
+      case '-':
+	| sub byte [M], n
+	break;
+      case '>':
+	| add M, n
+	break;
+      case '<':
+	| sub M, n
+	break;
+      case '.':
+	| push M
+	| movzx M, byte [M]
+	| call aword &putchar
+	| pop M
+	break;
+      case ',':
+	| push M
+	| call aword &getchar
+	| pop M
+	| mov byte [M], al
+	break;
+      case '[':
+	dasm_growpc(Dst, nextpc + 2);
+        | cmp byte [M], 0
+	| jz =>nextpc+1
+	|=>nextpc:
+	*loop = nextpc;
+	loop++;
+	nextpc += 2;
+	break;
+      case ']':
+	loop--;
+	| cmp byte [M], 0
+	| jnz =>*loop
+	|=>*loop+1:
+	break;
+    }
+  }
+
+  | ret
+
+  size_t size;
+  dasm_link(Dst, &size);
+  char *jit = mmap(NULL, size + sizeof(size_t),
+		   PROT_READ | PROT_WRITE,
+                   MAP_ANON | MAP_PRIVATE, -1, 0);
+  dasm_encode(Dst, jit);
+  dasm_free(Dst);
+  mprotect(jit, size, PROT_EXEC | PROT_READ);
+
+#if 0
+  /*
+   * Same assembly into a file, can be viewed with:
+   * $ objdump -D -Mintel,x86-64 -b binary -m i386 asm.bin
+   */
+  FILE *asm = fopen("asm.bin", "wb");
+  fwrite(jit, size, 1, asm);
+  fclose(asm);
+#endif
+
+  unsigned char mem[30000];
+  ((void (*)())jit)(mem);
+
+  munmap(mem, size);
+  return 0;
+}

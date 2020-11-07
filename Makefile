@@ -9,4 +9,4 @@ bf3: bf3.o
 	$(CC) $^ -ltcc -ldl -o $@
 
 clean:
-	rm -f bf0 bf1 bf2.o bf2.c bf2 bf3 minilua
+	rm -f bf0 bf1 bf2.o bf2.c bf2 bf3 bf3.o minilua
